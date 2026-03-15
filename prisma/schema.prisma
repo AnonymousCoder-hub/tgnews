@@ -1,0 +1,58 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Stores all Telegram messages
+model Message {
+  id              String   @id              // postId like "wfwitness-123"
+  postId          String                      // Original post ID like "wfwitness/123"
+  channelUsername String                      // Channel username
+  channelName     String                      // Channel display name
+  channelAvatar   String?                     // Channel avatar URL
+  text            String?   @db.Text          // Message text
+  views           Int       @default(0)       // View count
+  timestamp       DateTime                    // When message was posted
+  photos          String[]                    // Array of photo URLs
+  videos          Json?                       // Video metadata as JSON
+  hasLargeMedia   Boolean   @default(false)   // Has large media
+  largeMediaInfo  Json?                       // Large media metadata
+  reactions       Json?                       // Reactions as JSON array
+  storedAt        DateTime @default(now())    // When we saved it
+  updatedAt       DateTime @updatedAt         // Last update time
+
+  @@index([channelUsername])
+  @@index([timestamp(sort: Desc)])
+  @@index([storedAt(sort: Desc)])
+}
+
+// Tracks last scrape time
+model LastScrape {
+  id        String   @id @default("singleton")
+  timestamp DateTime @default(now())
+}
+
+// Market data for commodities and stocks
+model MarketData {
+  symbol        String   @id              // e.g. CL=F, BTC-USD
+  name          String                     // Display name
+  category      String                     // energy, metals, indices, crypto
+  price         Double   @default(0)
+  change        Double   @default(0)
+  changePercent Double   @default(0)
+  open          Double   @default(0)
+  high          Double   @default(0)
+  low           Double   @default(0)
+  volume        BigInt   @default(0)
+  previousClose Double   @default(0)
+  lastUpdated   DateTime @default(now())
+
+  @@index([category])
+}

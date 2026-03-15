@@ -1,0 +1,1363 @@
+"use client";
+
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useTheme } from "next-themes";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { 
+  Search, 
+  RefreshCw, 
+  Eye, 
+  Clock, 
+  Image as ImageIcon, 
+  Video, 
+  Filter,
+  TrendingUp,
+  ArrowUp,
+  Loader2,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Wifi,
+  WifiOff,
+  ExternalLink,
+  Play,
+  X,
+  FileVideo,
+  Download,
+  Moon,
+  Sun
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+
+interface TelegramMessage {
+  id: string;
+  postId: string;
+  channelUsername: string;
+  channelName: string;
+  channelAvatar: string | null;
+  text: string | null;
+  views: number;
+  timestamp: string;
+  photos: string[];
+  videos: { type: string; url: string; thumbnailUrl?: string; duration?: string }[];
+  hasLargeMedia: boolean;
+  largeMediaInfo?: {
+    type: 'video' | 'file' | 'photo';
+    thumbnailUrl?: string;
+    label?: string;
+  };
+  reactions: { emoji: string; count: number }[];
+  twitterLink?: string | null;
+}
+
+interface TelegramChannel {
+  username: string;
+  name: string;
+  description: string | null;
+  avatarUrl: string | null;
+  subscriberCount: string | null;
+}
+
+interface ApiResponse {
+  success: boolean;
+  data: {
+    channels: TelegramChannel[];
+    messages: TelegramMessage[];
+    lastUpdated: string | null;
+  };
+  meta?: {
+    isCached: boolean;
+    cacheAge: number | null;
+    availableChannels: readonly string[];
+  };
+}
+
+// Channel colors for badges
+const CHANNEL_COLORS: Record<string, string> = {
+  wfwitness: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+  warmonitors: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  ethanlevins: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+  Middle_East_Spectator: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+  rnintel: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
+};
+
+// Format relative time
+function formatRelativeTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+// Format view count
+function formatViews(views: number): string {
+  if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
+  if (views >= 1000) return `${(views / 1000).toFixed(1)}K`;
+  return views.toString();
+}
+
+// Get Telegram post URL
+function getTelegramUrl(postId: string): string {
+  return `https://t.me/${postId}`;
+}
+
+// Proxy URL for media
+function getProxyUrl(url: string, type: 'image' | 'video' = 'image'): string {
+  return `/api/media?url=${encodeURIComponent(url)}&type=${type}`;
+}
+
+// View on Telegram button overlay
+function TelegramButton({ postId, className }: { postId: string; className?: string }) {
+  return (
+    <a
+      href={getTelegramUrl(postId)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(
+        "absolute z-10 flex items-center gap-1 rounded-lg bg-black/70 hover:bg-black/90 text-white transition-all text-xs px-2 py-1.5",
+        "opacity-0 group-hover:opacity-100",
+        className
+      )}
+      title="Open on Telegram"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <ExternalLink className="h-3.5 w-3.5" />
+      <span>Open in Telegram</span>
+    </a>
+  );
+}
+
+// Large Media Component with thumbnail
+function LargeMediaCard({ message }: { message: TelegramMessage }) {
+  const thumbnailUrl = message.largeMediaInfo?.thumbnailUrl;
+  const mediaType = message.largeMediaInfo?.type || 'video';
+  const label = message.largeMediaInfo?.label;
+  
+  // Extract file size from label if available
+  const fileSize = label?.match(/(\d+(?:\.\d+)?\s*[MGK]B)/i)?.[0] || '';
+  
+  return (
+    <div className="relative w-full h-full group">
+      {thumbnailUrl ? (
+        <a
+          href={getTelegramUrl(message.postId)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="relative w-full h-full block"
+        >
+          <img
+            src={thumbnailUrl}
+            alt=""
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+          
+          {/* Centered play button - sleek style */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="h-14 w-14 rounded-full bg-white/95 flex items-center justify-center shadow-lg shadow-black/30 group-hover:scale-110 transition-transform duration-200">
+              {mediaType === 'video' ? (
+                <Play className="h-6 w-6 text-gray-700 ml-1" fill="currentColor" />
+              ) : (
+                <FileVideo className="h-6 w-6 text-gray-700" />
+              )}
+            </div>
+          </div>
+          
+          {/* Bottom info - sleek pill style */}
+          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-sm text-white text-xs px-2.5 py-1.5 rounded-full">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+              <span>Large {mediaType}</span>
+              {fileSize && <span className="text-white/60">• {fileSize}</span>}
+            </div>
+          </div>
+        </a>
+      ) : (
+        <a
+          href={getTelegramUrl(message.postId)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-muted to-muted/50 gap-3"
+        >
+          <div className="h-14 w-14 rounded-full bg-white/95 flex items-center justify-center shadow-lg">
+            <FileVideo className="h-6 w-6 text-gray-700" />
+          </div>
+          <div className="flex items-center gap-1.5 bg-muted/80 text-xs px-3 py-1.5 rounded-full">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            <span>Large media • Open on Telegram</span>
+          </div>
+        </a>
+      )}
+      <TelegramButton postId={message.postId} className="top-2 right-2" />
+    </div>
+  );
+}
+
+// Media item type for gallery
+interface MediaItem {
+  type: 'photo' | 'video';
+  url: string;
+  thumbnailUrl?: string;
+  duration?: string;
+}
+
+// Media Gallery Component with thumbnail strip
+function MediaGallery({ 
+  message, 
+  onOpenViewer 
+}: { 
+  message: TelegramMessage;
+  onOpenViewer: (type: 'image' | 'video', url: string, thumbnail?: string, duration?: string) => void;
+}) {
+  // Combine all media into a single array - videos first, then photos
+  const allMedia: MediaItem[] = useMemo(() => {
+    const items: MediaItem[] = [];
+    
+    // Add all videos that aren't "large_media" type
+    message.videos.forEach(video => {
+      if (video.type !== 'large_media') {
+        items.push({
+          type: 'video',
+          url: video.url,
+          thumbnailUrl: video.thumbnailUrl,
+          duration: video.duration
+        });
+      }
+    });
+    
+    // Add ALL photos
+    message.photos.forEach(photo => {
+      items.push({
+        type: 'photo',
+        url: photo
+      });
+    });
+    
+    return items;
+  }, [message.photos, message.videos]);
+  
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [loadedIndexes, setLoadedIndexes] = useState<Set<number>>(new Set());
+  
+  // Handle selection change
+  const handleSelectIndex = (index: number) => {
+    setSelectedIndex(index);
+  };
+  
+  // Mark an image as loaded
+  const handleImageLoad = (index: number) => {
+    setLoadedIndexes(prev => new Set(prev).add(index));
+  };
+  
+  if (allMedia.length === 0) return null;
+  
+  const selectedMedia = allMedia[selectedIndex];
+  const hasMultiple = allMedia.length > 1;
+  const isLoaded = loadedIndexes.has(selectedIndex);
+  
+  return (
+    <div className="relative w-full h-full group">
+      {/* Main media display */}
+      <div 
+        className="w-full h-full cursor-pointer"
+        onClick={() => {
+          // If video has no URL but has thumbnail, open Telegram instead
+          if (selectedMedia.type === 'video' && !selectedMedia.url && selectedMedia.thumbnailUrl) {
+            window.open(getTelegramUrl(message.postId), '_blank');
+            return;
+          }
+          if (selectedMedia.type === 'video') {
+            onOpenViewer('video', selectedMedia.url, selectedMedia.thumbnailUrl, selectedMedia.duration);
+          } else {
+            onOpenViewer('image', selectedMedia.url);
+          }
+        }}
+      >
+        {selectedMedia.type === 'video' ? (
+          <div className="relative w-full h-full bg-muted">
+            {!isLoaded && selectedMedia.thumbnailUrl && <div className="absolute inset-0 bg-muted animate-pulse" />}
+            {selectedMedia.thumbnailUrl ? (
+              <img
+                src={selectedMedia.thumbnailUrl}
+                alt=""
+                className={cn("w-full h-full object-cover transition-opacity duration-200", !isLoaded && "opacity-0")}
+                loading="lazy"
+                onLoad={() => handleImageLoad(selectedIndex)}
+              />
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-br from-muted to-muted/50" />
+            )}
+            <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
+              <div className="h-14 w-14 rounded-full bg-white/90 dark:bg-white/80 border-2 border-black/10 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                <Play className="h-6 w-6 text-blue-500 ml-1" fill="currentColor" />
+              </div>
+            </div>
+            {selectedMedia.duration && (
+              <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs z-10">
+                {selectedMedia.duration}
+              </div>
+            )}
+            {/* Show "Open in Telegram" indicator if no video URL */}
+            {selectedMedia.type === 'video' && !selectedMedia.url && (
+              <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/70 text-white text-xs flex items-center gap-1">
+                <ExternalLink className="h-3 w-3" />
+                Open in Telegram
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="relative w-full h-full">
+            {!isLoaded && <div className="absolute inset-0 bg-muted animate-pulse" />}
+            <img
+              src={selectedMedia.url}
+              alt=""
+              className={cn("w-full h-full object-cover transition-opacity duration-200", !isLoaded && "opacity-0")}
+              loading="lazy"
+              onLoad={() => handleImageLoad(selectedIndex)}
+            />
+          </div>
+        )}
+      </div>
+      
+      {/* Thumbnail strip at bottom */}
+      {hasMultiple && (
+        <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent z-20">
+          <div 
+            className="flex gap-1.5 overflow-x-auto scrollbar-hide px-2"
+            style={{
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            {allMedia.map((media, index) => (
+              <button
+                key={index}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  handleSelectIndex(index);
+                }}
+                className={cn(
+                  "relative w-11 h-11 rounded-lg overflow-hidden transition-all duration-200 flex-shrink-0",
+                  index === selectedIndex 
+                    ? "border-[1.5px] border-white/90 shadow-[0_0_12px_rgba(255,255,255,0.4),inset_0_0_0_1px_rgba(255,255,255,0.1)]" 
+                    : "border-[1.5px] border-white/20 opacity-50 hover:opacity-75 hover:border-white/40"
+                )}
+              >
+                {media.thumbnailUrl || media.type === 'photo' ? (
+                  <img
+                    src={media.thumbnailUrl || media.url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-muted/50 flex items-center justify-center">
+                    <Video className="h-4 w-4 text-white/70" />
+                  </div>
+                )}
+                {media.type === 'video' && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                    <div className="h-4 w-4 rounded-full bg-white/95 flex items-center justify-center shadow-sm">
+                      <Play className="h-2 w-2 text-gray-700 ml-px" fill="currentColor" />
+                    </div>
+                  </div>
+                )}
+              </button>
+            ))}
+            {/* Extra padding at end for scroll indication */}
+            {allMedia.length > 4 && <div className="w-2 flex-shrink-0" />}
+          </div>
+          {/* Fade indicators for scrollability */}
+          {allMedia.length > 4 && (
+            <>
+              <div className="absolute left-0 bottom-0 top-0 w-6 bg-gradient-to-r from-black/70 to-transparent pointer-events-none z-10" />
+              <div className="absolute right-0 bottom-0 top-0 w-6 bg-gradient-to-l from-black/70 to-transparent pointer-events-none z-10" />
+            </>
+          )}
+        </div>
+      )}
+      
+      {/* Telegram button */}
+      <div className={cn(
+        "absolute right-2 z-30",
+        hasMultiple ? "bottom-16" : "bottom-2"
+      )}>
+        <TelegramButton postId={message.postId} className="" />
+      </div>
+      
+      {/* Media count badge */}
+      {hasMultiple && (
+        <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/70 text-white text-xs flex items-center gap-1 z-10">
+          {selectedMedia.type === 'video' ? <Video className="h-3 w-3" /> : <ImageIcon className="h-3 w-3" />}
+          {selectedIndex + 1} / {allMedia.length}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Expandable text component for long messages
+function MessageText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const needsExpansion = text.length > 280 || text.split('\n').length > 4;
+  
+  return (
+    <div className="mb-3">
+      <p className={cn(
+        "text-sm selectable-text leading-relaxed whitespace-pre-wrap",
+        !expanded && needsExpansion && "line-clamp-4"
+      )}>
+        {text}
+      </p>
+      {needsExpansion && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs text-primary hover:text-primary/80 flex items-center gap-0.5 mt-1.5 font-medium"
+        >
+          {expanded ? (
+            <>
+              Show less <ChevronUp className="h-3 w-3" />
+            </>
+          ) : (
+            <>
+              Show more <ChevronDown className="h-3 w-3" />
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Sleek loading screen with progress
+function LoadingScreen() {
+  const [progress, setProgress] = useState(0);
+  
+  const statusMessages = [
+    { text: "Connecting to feed...", icon: "📡" },
+    { text: "Fetching channels...", icon: "🔗" },
+    { text: "Getting latest news...", icon: "📰" },
+    { text: "Almost ready...", icon: "⚡" },
+    { text: "Loaded successfully!", icon: "✓" },
+  ];
+  
+  // Animate progress
+  useEffect(() => {
+    const progressInterval = setInterval(() => {
+      setProgress(prev => {
+        // Simulate realistic loading with variable speed
+        const increment = Math.random() * 8 + 4;
+        const next = Math.min(prev + increment, 100);
+        return next;
+      });
+    }, 150);
+    
+    return () => clearInterval(progressInterval);
+  }, []);
+  
+  // Derive status index from progress
+  const statusIndex = progress < 20 ? 0 
+    : progress < 45 ? 1 
+    : progress < 75 ? 2 
+    : progress < 95 ? 3 
+    : 4;
+  
+  const currentStatus = statusMessages[statusIndex];
+  const isComplete = progress >= 100;
+  
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-6 w-72 px-4">
+        {/* Logo with subtle animation */}
+        <div className={cn(
+          "relative transition-all duration-500",
+          isComplete && "scale-110"
+        )}>
+          <img 
+            src="/logo.png" 
+            alt="newstel" 
+            className="h-16 w-16 rounded-2xl object-contain"
+          />
+          {/* Subtle glow ring when complete */}
+          {isComplete && (
+            <div className="absolute inset-0 rounded-2xl bg-primary/20 animate-ping" />
+          )}
+        </div>
+        
+        {/* Progress bar */}
+        <div className="w-full space-y-3">
+          {/* Bar track */}
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            {/* Progress fill with gradient */}
+            <div 
+              className={cn(
+                "h-full rounded-full transition-all duration-200 ease-out",
+                isComplete 
+                  ? "bg-gradient-to-r from-green-500 to-emerald-500" 
+                  : "bg-gradient-to-r from-primary to-primary/70"
+              )}
+              style={{ width: `${Math.min(progress, 100)}%` }}
+            />
+          </div>
+          
+          {/* Status text */}
+          <div className="flex items-center justify-center gap-2">
+            <span className={cn(
+              "text-sm font-medium transition-all duration-300",
+              isComplete ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+            )}>
+              {currentStatus.text}
+            </span>
+          </div>
+        </div>
+        
+        {/* Percentage */}
+        <div className={cn(
+          "text-xs tabular-nums font-mono transition-all duration-200",
+          isComplete ? "text-green-500" : "text-muted-foreground/60"
+        )}>
+          {Math.round(Math.min(progress, 100))}%
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function NewsAggregator() {
+  const [messages, setMessages] = useState<TelegramMessage[]>([]);
+  const [channels, setChannels] = useState<TelegramChannel[]>([]);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [cacheAge, setCacheAge] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(true);
+  
+  // Media viewer
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerMedia, setViewerMedia] = useState<{ type: 'image' | 'video'; url: string; thumbnail?: string; duration?: string } | null>(null);
+  
+  // Filters
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "views" | "reactions">("newest");
+  const [mediaFilter, setMediaFilter] = useState<"all" | "photos" | "videos" | "none">("all");
+
+  // Track if we're currently updating
+  const [isUpdating, setIsUpdating] = useState(false);
+  // Countdown to next auto-refresh (in seconds)
+  const [nextRefreshIn, setNextRefreshIn] = useState(60);
+  
+  // Custom refresh timer
+  const [customRefreshEnabled, setCustomRefreshEnabled] = useState(false);
+  const [customRefreshSeconds, setCustomRefreshSeconds] = useState(60);
+  const [showCustomTimerPopup, setShowCustomTimerPopup] = useState(false);
+  const [tempCustomSeconds, setTempCustomSeconds] = useState("60");
+  const [popupPosition, setPopupPosition] = useState({ top: 0, right: 0 });
+  const timerButtonRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  
+  // Get current refresh interval
+  const currentRefreshInterval = customRefreshEnabled ? customRefreshSeconds : 60;
+  
+  // Update popup position when it opens
+  useEffect(() => {
+    if (showCustomTimerPopup && timerButtonRef.current) {
+      const rect = timerButtonRef.current.getBoundingClientRect();
+      setPopupPosition({
+        top: rect.bottom + 8,
+        right: window.innerWidth - rect.right - 16,
+      });
+    }
+  }, [showCustomTimerPopup]);
+  
+  // Infinite scroll - show messages in batches
+  const [visibleCount, setVisibleCount] = useState(20);
+  const MESSAGES_PER_BATCH = 10;
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  
+  // Smart footer - hide on scroll up, show on scroll down
+  const [footerVisible, setFooterVisible] = useState(true);
+  const lastScrollY = useRef(0);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Fetch data
+  const fetchData = useCallback(async (forceRefresh = false) => {
+    try {
+      if (forceRefresh) {
+        setRefreshing(true);
+      }
+      setIsUpdating(true);
+      setError(null);
+
+      const url = `/api/telegram${forceRefresh ? "?refresh=true" : ""}`;
+      const response = await fetch(url, {
+        headers: {
+          'x-api-secret': 'newstel-internal-2024'
+        }
+      });
+      const result: ApiResponse = await response.json();
+
+      if (result.success) {
+        setMessages(result.data.messages);
+        setChannels(result.data.channels);
+        setLastUpdated(result.data.lastUpdated);
+        setCacheAge(result.meta?.cacheAge ?? 0);
+        // Don't reset countdown here - let the auto-refresh logic handle it
+      } else {
+        setError("Failed to load data");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch data");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+      setIsUpdating(false);
+    }
+  }, []);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Auto-refresh based on current interval
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNextRefreshIn(prev => {
+        if (prev <= 1) {
+          // When custom timer is enabled, force a fresh scrape
+          // Otherwise just fetch (server will use cache if < 60s)
+          const forceRefresh = customRefreshEnabled && customRefreshSeconds < 60;
+          fetchData(forceRefresh);
+          return currentRefreshInterval;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [fetchData, currentRefreshInterval, customRefreshEnabled, customRefreshSeconds]);
+  
+  // Reset countdown when custom timer changes
+  useEffect(() => {
+    setNextRefreshIn(currentRefreshInterval);
+  }, [currentRefreshInterval]);
+  
+  const applyCustomTimer = () => {
+    const seconds = parseInt(tempCustomSeconds, 10);
+    if (seconds >= 5 && seconds <= 3600) {
+      setCustomRefreshSeconds(seconds);
+      setShowCustomTimerPopup(false);
+    }
+  };
+  
+  // Close popup when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showCustomTimerPopup && timerButtonRef.current && popupRef.current) {
+        const target = e.target as Node;
+        if (!timerButtonRef.current.contains(target) && !popupRef.current.contains(target)) {
+          setShowCustomTimerPopup(false);
+        }
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showCustomTimerPopup]);
+
+  // Update cache age every second
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCacheAge(prev => prev !== null ? prev + 1 : null);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Disable right-click context menu (except on media viewer and timer popup)
+  useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      // Allow context menu on media viewer and timer popup
+      const target = e.target as HTMLElement;
+      if (target.closest('.media-viewer') || target.closest('.timer-popup')) {
+        return;
+      }
+      e.preventDefault();
+    };
+
+    document.addEventListener('contextmenu', handleContextMenu);
+    return () => document.removeEventListener('contextmenu', handleContextMenu);
+  }, []);
+
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [searchQuery, selectedChannel, sortBy, mediaFilter]);
+
+  // Filter and sort messages
+  const filteredMessages = useMemo(() => {
+    let result = [...messages];
+
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(
+        (msg) =>
+          msg.text?.toLowerCase().includes(query) ||
+          msg.channelName.toLowerCase().includes(query)
+      );
+    }
+
+    // Channel filter
+    if (selectedChannel) {
+      result = result.filter((msg) => msg.channelUsername === selectedChannel);
+    }
+
+    // Media filter
+    if (mediaFilter === "photos") {
+      result = result.filter((msg) => msg.photos.length > 0);
+    } else if (mediaFilter === "videos") {
+      result = result.filter((msg) => msg.videos.length > 0);
+    } else if (mediaFilter === "none") {
+      result = result.filter((msg) => msg.photos.length === 0 && msg.videos.length === 0);
+    }
+
+    // Sort
+    if (sortBy === "newest") {
+      result.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    } else if (sortBy === "oldest") {
+      result.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    } else if (sortBy === "views") {
+      result.sort((a, b) => b.views - a.views);
+    } else if (sortBy === "reactions") {
+      result.sort((a, b) => {
+        const aReactions = a.reactions.reduce((sum, r) => sum + r.count, 0);
+        const bReactions = b.reactions.reduce((sum, r) => sum + r.count, 0);
+        return bReactions - aReactions;
+      });
+    }
+
+    return result;
+  }, [messages, searchQuery, selectedChannel, sortBy, mediaFilter]);
+
+  // Slice messages for infinite scroll
+  const displayMessages = filteredMessages.slice(0, visibleCount);
+  const hasMore = visibleCount < filteredMessages.length;
+
+  // Infinite scroll observer - must be after filteredMessages is defined
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && visibleCount < filteredMessages.length) {
+          setVisibleCount(prev => Math.min(prev + MESSAGES_PER_BATCH, filteredMessages.length));
+        }
+      },
+      { rootMargin: '100px' }
+    );
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [visibleCount, filteredMessages.length]);
+
+  // Smart footer scroll detection
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const scrollDiff = currentScrollY - lastScrollY.current;
+      
+      // Show footer when:
+      // 1. Scrolling down
+      // 2. Near the bottom of the page
+      // 3. Near the top of the page
+      const nearBottom = window.innerHeight + currentScrollY >= document.documentElement.scrollHeight - 100;
+      const nearTop = currentScrollY < 100;
+      
+      if (nearBottom || nearTop) {
+        setFooterVisible(true);
+      } else if (scrollDiff > 5) {
+        // Scrolling down - show footer
+        setFooterVisible(true);
+      } else if (scrollDiff < -5) {
+        // Scrolling up - hide footer
+        setFooterVisible(false);
+      }
+      
+      lastScrollY.current = currentScrollY;
+      
+      // Clear any existing timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      
+      // Show footer after scroll stops
+      scrollTimeoutRef.current = setTimeout(() => {
+        setFooterVisible(true);
+      }, 1500);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Calculate stats - count today's messages only
+  const stats = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    
+    const todayMessages = messages.filter(m => new Date(m.timestamp).getTime() >= todayStart);
+    
+    return {
+      total: messages.length,
+      today: todayMessages.length,
+      withMedia: messages.filter((m) => m.photos.length > 0 || m.videos.length > 0).length,
+      totalViews: messages.reduce((sum, m) => sum + m.views, 0),
+    };
+  }, [messages]);
+
+  // Open media viewer
+  const openViewer = (type: 'image' | 'video', url: string, thumbnail?: string, duration?: string) => {
+    setViewerMedia({ type, url, thumbnail, duration });
+    setViewerOpen(true);
+  };
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col bg-background">
+      {/* Header */}
+      <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 overflow-visible">
+        <div className="container mx-auto px-4">
+          <div className="flex h-14 items-center justify-between gap-4 relative">
+            {/* Logo */}
+            <div className="flex items-center gap-2.5">
+              <img 
+                src="/logo.png" 
+                alt="newstel" 
+                className="h-10 w-10 rounded-lg object-contain"
+              />
+              <div className="hidden sm:block">
+                <h1 className="text-lg font-semibold">newstel</h1>
+              </div>
+            </div>
+
+            {/* Search */}
+            <div className="flex-1 max-w-md">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search news..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 h-9 bg-muted/50 border-0 focus-visible:ring-1"
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              {/* Live indicator */}
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-primary/10">
+                {isLive ? (
+                  <Wifi className="h-3.5 w-3.5 text-primary" />
+                ) : (
+                  <WifiOff className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
+                <span className="text-xs font-medium text-primary">LIVE</span>
+              </div>
+              
+              {/* Refresh button */}
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => fetchData(true)}
+                  disabled={refreshing || isUpdating}
+                  className={cn(
+                    "h-9 w-9 transition-all duration-100 active:scale-90 select-none",
+                    isUpdating && "text-green-500 hover:text-green-600 bg-green-500/10"
+                  )}
+                  title="Refresh now"
+                >
+                  <RefreshCw className={cn("h-4 w-4", isUpdating && "animate-spin")} />
+                </Button>
+                
+                {isUpdating && (
+                  <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-0.5">
+                    <span className="h-1 w-1 rounded-full bg-green-500 animate-blink" style={{ animationDelay: '0ms' }} />
+                    <span className="h-1 w-1 rounded-full bg-green-500 animate-blink" style={{ animationDelay: '150ms' }} />
+                    <span className="h-1 w-1 rounded-full bg-green-500 animate-blink" style={{ animationDelay: '300ms' }} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Timer popup - rendered outside header */}
+      {showCustomTimerPopup && (
+        <div 
+          ref={popupRef}
+          className="timer-popup fixed bg-popover border rounded-xl shadow-xl p-3 w-[280px]"
+          style={{
+            top: popupPosition.top,
+            right: popupPosition.right,
+            zIndex: 9999,
+          }}
+        >
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-muted-foreground">Update Interval</div>
+              {/* Toggle switch inside popup */}
+              <button
+                onClick={() => setCustomRefreshEnabled(!customRefreshEnabled)}
+                className={cn(
+                  "relative w-10 h-5 rounded-full transition-colors duration-200",
+                  customRefreshEnabled ? "bg-primary" : "bg-muted"
+                )}
+                title={customRefreshEnabled ? "ON - click to disable" : "OFF - click to enable"}
+              >
+                <span 
+                  className={cn(
+                    "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200",
+                    customRefreshEnabled && "translate-x-5"
+                  )} 
+                />
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                value={tempCustomSeconds}
+                onChange={(e) => setTempCustomSeconds(e.target.value)}
+                placeholder="sec"
+                className="h-9 w-20 text-sm"
+                min={5}
+                max={3600}
+              />
+              <span className="text-xs text-muted-foreground">seconds</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setTempCustomSeconds("20")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs rounded-lg border hover:bg-muted transition-colors",
+                  tempCustomSeconds === "20" && "bg-primary text-primary-foreground border-primary"
+                )}
+              >
+                20s
+              </button>
+              <button
+                onClick={() => setTempCustomSeconds("30")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs rounded-lg border hover:bg-muted transition-colors",
+                  tempCustomSeconds === "30" && "bg-primary text-primary-foreground border-primary"
+                )}
+              >
+                30s
+              </button>
+              <button
+                onClick={() => setTempCustomSeconds("60")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs rounded-lg border hover:bg-muted transition-colors",
+                  tempCustomSeconds === "60" && "bg-primary text-primary-foreground border-primary"
+                )}
+              >
+                1m
+              </button>
+              <button
+                onClick={() => setTempCustomSeconds("300")}
+                className={cn(
+                  "flex-1 py-1.5 text-xs rounded-lg border hover:bg-muted transition-colors",
+                  tempCustomSeconds === "300" && "bg-primary text-primary-foreground border-primary"
+                )}
+              >
+                5m
+              </button>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button 
+                variant="outline"
+                size="sm" 
+                className="flex-1 h-8 text-xs"
+                onClick={() => setShowCustomTimerPopup(false)}
+              >
+                Close
+              </Button>
+              <Button 
+                size="sm" 
+                className="flex-1 h-8 text-xs"
+                onClick={applyCustomTimer}
+                disabled={parseInt(tempCustomSeconds, 10) < 5 || parseInt(tempCustomSeconds, 10) > 3600}
+              >
+                Apply
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stats Bar */}
+      <div className="border-b bg-muted/30">
+        <div className="container mx-auto px-4 py-1.5">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1.5 font-medium text-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                Live
+              </span>
+              <span>{stats.today} updates today</span>
+            </div>
+            <button
+              ref={timerButtonRef}
+              onClick={() => {
+                setTempCustomSeconds(customRefreshSeconds.toString());
+                setShowCustomTimerPopup(!showCustomTimerPopup);
+              }}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all duration-150",
+                "hover:bg-muted/50 active:scale-95",
+                showCustomTimerPopup ? "border-primary/50 bg-primary/5" : "border-border/50 hover:border-border",
+                customRefreshEnabled && "border-primary/30 bg-primary/5"
+              )}
+            >
+              <span>Next update in</span>
+              <span className="font-mono text-[10px] tabular-nums font-medium text-foreground">{nextRefreshIn}s</span>
+              {customRefreshEnabled && (
+                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="border-b bg-background">
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Channel Filters */}
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
+              <Button
+                variant={selectedChannel === null ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSelectedChannel(null)}
+                className="h-7 text-xs rounded-full"
+              >
+                All
+              </Button>
+              {channels.map((channel) => (
+                <Button
+                  key={channel.username}
+                  variant={selectedChannel === channel.username ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setSelectedChannel(channel.username)}
+                  className="h-7 text-xs rounded-full whitespace-nowrap"
+                >
+                  {channel.name}
+                </Button>
+              ))}
+            </div>
+
+            <div className="flex-1" />
+
+            {/* Sort & Filter Dropdowns */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-7 text-xs">
+                  <Filter className="h-3 w-3 mr-1" />
+                  {mediaFilter === "all" ? "All Media" : mediaFilter === "photos" ? "Photos" : mediaFilter === "videos" ? "Videos" : "Text Only"}
+                  <ChevronDown className="h-3 w-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-32">
+                <DropdownMenuItem onClick={() => setMediaFilter("all")}>All Media</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setMediaFilter("photos")}>Photos Only</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setMediaFilter("videos")}>Videos Only</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setMediaFilter("none")}>Text Only</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-7 text-xs">
+                  <ArrowUp className="h-3 w-3 mr-1" />
+                  {sortBy === "newest" ? "Newest" : sortBy === "oldest" ? "Oldest" : sortBy === "views" ? "Most Views" : "Most Reactions"}
+                  <ChevronDown className="h-3 w-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-36">
+                <DropdownMenuItem onClick={() => setSortBy("newest")}>Newest First</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy("oldest")}>Oldest First</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy("views")}>Most Views</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy("reactions")}>Most Reactions</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </div>
+
+      {/* Error State */}
+      {error && (
+        <div className="container mx-auto px-4 py-8">
+          <div className="flex items-center gap-2 text-destructive bg-destructive/10 rounded-lg p-4">
+            <AlertCircle className="h-5 w-5" />
+            <span>{error}</span>
+            <Button variant="ghost" size="sm" onClick={() => fetchData(true)} className="ml-auto">
+              Retry
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="flex-1 pb-16">{/* pb-16 for fixed footer space */}
+        <div className="container mx-auto px-4 py-6">
+          {filteredMessages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <Search className="h-12 w-12 mb-4 opacity-50" />
+              <p>No results found</p>
+              <p className="text-sm">Try adjusting your filters</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {displayMessages.map((message, index) => (
+                <Card 
+                  key={message.id} 
+                  className={cn(
+                    "overflow-hidden hover:shadow-lg transition-all duration-200 border-border/50 animate-fade-in",
+                    index < 3 && "ring-2 ring-primary/20"
+                  )}
+                  style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
+                >
+                  {/* Media */}
+                  {(message.photos.length > 0 || message.videos.length > 0 || message.hasLargeMedia) && (
+                    <div className="relative aspect-video bg-muted overflow-hidden">
+                      {/* Large media only (no playable videos/photos) */}
+                      {message.hasLargeMedia && message.videos.filter(v => v.type !== 'large_media').length === 0 && message.photos.length === 0 ? (
+                        <LargeMediaCard message={message} />
+                      ) : (
+                        <MediaGallery message={message} onOpenViewer={openViewer} />
+                      )}
+                    </div>
+                  )}
+
+                  <CardContent className="p-4">
+                    {/* Channel Info */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <Badge 
+                        variant="outline" 
+                        className={cn("text-xs font-medium", CHANNEL_COLORS[message.channelUsername])}
+                      >
+                        {message.channelName}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground ml-auto flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {formatRelativeTime(message.timestamp)}
+                      </span>
+                    </div>
+
+                    {/* Text */}
+                    {message.text && (
+                      <MessageText text={message.text} />
+                    )}
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Eye className="h-3 w-3" />
+                        {formatViews(message.views)}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {message.reactions.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            {message.reactions.slice(0, 3).map((reaction, i) => (
+                              <span key={i} className="text-xs flex items-center gap-0.5">
+                                {reaction.emoji}
+                                <span className="text-muted-foreground">{reaction.count}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <a
+                          href={getTelegramUrl(message.postId)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:text-primary/80"
+                          title="View on Telegram"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+            
+            {/* Load more trigger */}
+            <div ref={loadMoreRef} className="py-8 flex justify-center">
+              {hasMore ? (
+                <Button 
+                  variant="outline" 
+                  onClick={() => setVisibleCount(prev => Math.min(prev + MESSAGES_PER_BATCH, filteredMessages.length))}
+                  className="gap-2"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                  Load more ({filteredMessages.length - visibleCount} remaining)
+                </Button>
+              ) : filteredMessages.length > 20 ? (
+                <p className="text-sm text-muted-foreground">All {filteredMessages.length} messages loaded</p>
+              ) : null}
+            </div>
+          </>
+          )}
+        </div>
+      </main>
+
+      {/* Media Viewer Dialog */}
+      <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+        <DialogContent className="media-viewer max-w-4xl p-0 bg-black/95 border-0 overflow-hidden">
+          <DialogClose className="absolute top-3 right-3 z-10 h-10 w-10 rounded-full bg-white/10 backdrop-blur-sm text-white hover:bg-white/20 transition-colors flex items-center justify-center ring-1 ring-white/20">
+            <X className="h-5 w-5" />
+          </DialogClose>
+          {viewerMedia && (
+            <div className="relative">
+              {viewerMedia.type === 'video' ? (
+                <video
+                  src={getProxyUrl(viewerMedia.url, 'video')}
+                  poster={viewerMedia.thumbnail}
+                  className="w-full max-h-[80vh] object-contain"
+                  controls
+                  autoPlay
+                  onError={(e) => {
+                    const video = e.currentTarget;
+                    if (!video.src.includes('telesco.pe')) {
+                      video.src = viewerMedia.url;
+                    }
+                  }}
+                />
+              ) : (
+                <img
+                  src={viewerMedia.url}
+                  alt=""
+                  className="w-full max-h-[80vh] object-contain"
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (!img.src.includes('/api/media')) {
+                      img.src = getProxyUrl(viewerMedia.url, 'image');
+                    }
+                  }}
+                />
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Smart Footer - shows on scroll down, hides on scroll up */}
+      <footer 
+        className={cn(
+          "fixed bottom-0 left-0 right-0 z-40 border-t bg-background/95 backdrop-blur-sm transition-transform duration-300 ease-in-out",
+          footerVisible ? "translate-y-0" : "translate-y-full"
+        )}
+      >
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span className="flex items-center gap-2">
+              <img src="/logo.png" alt="newstel" className="h-4 w-4 rounded object-contain" />
+              <span>newstel — Real-time news from trusted Telegram channels</span>
+            </span>
+            <div className="flex items-center gap-4">
+              <span>{channels.length} channels • {stats.total} updates</span>
+              <span className="flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                Auto-updates every minute
+              </span>
+            </div>
+          </div>
+        </div>
+      </footer>
+
+      {/* Theme Toggle Button */}
+      <ThemeToggle />
+    </div>
+  );
+}
+
+// Theme Toggle Component
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    requestAnimationFrame(() => setMounted(true));
+  }, []);
+
+  if (!mounted) {
+    return (
+      <Button
+        variant="outline"
+        size="icon"
+        className="fixed bottom-4 right-4 z-50 h-10 w-10 rounded-full shadow-lg bg-background/80 backdrop-blur-sm"
+      >
+        <Sun className="h-5 w-5" />
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="icon"
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      className="fixed bottom-4 right-4 z-50 h-10 w-10 rounded-full shadow-lg bg-background/80 backdrop-blur-sm hover:bg-accent"
+      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {theme === "dark" ? (
+        <Sun className="h-5 w-5 text-yellow-500" />
+      ) : (
+        <Moon className="h-5 w-5 text-slate-700" />
+      )}
+    </Button>
+  );
+}
