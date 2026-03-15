@@ -493,46 +493,15 @@ export async function getNews(category: string, forceRefresh = false): Promise<N
   return uniqueArticles;
 }
 
-// Live TV channels from around the world - YouTube 24/7 live streams
-// Organized by region with country flags
+// Live TV channels - Proper YouTube live stream embed URLs
 export const LIVE_TV_CHANNELS = [
-  // Americas
-  { name: 'ABC News', flag: '🇺🇸', country: 'USA', channelUrl: 'https://www.youtube.com/embed/iipR5yUp36o' },
-  { name: 'CBS News', flag: '🇺🇸', country: 'USA', channelUrl: 'https://www.youtube.com/embed/9rIy0xY99a0' },
-  { name: 'NBC News', flag: '🇺🇸', country: 'USA', channelUrl: 'https://www.youtube.com/embed/R31cSPZNECY' },
-  { name: 'Bloomberg', flag: '🇺🇸', country: 'USA', channelUrl: 'https://www.youtube.com/embed/JhV51iw8-ak' },
-  
-  // UK
-  { name: 'Sky News', flag: '🇬🇧', country: 'UK', channelUrl: 'https://www.youtube.com/embed/9Auq9mYxFEE' },
-  { name: 'BBC News', flag: '🇬🇧', country: 'UK', channelUrl: 'https://www.youtube.com/embed/YDvsBbKfLPA' },
-  
-  // Europe
-  { name: 'DW News', flag: '🇩🇪', country: 'Germany', channelUrl: 'https://www.youtube.com/embed/LuKwFajn37U' },
-  { name: 'France 24', flag: '🇫🇷', country: 'France', channelUrl: 'https://www.youtube.com/embed/Ap-UM1O9RBU' },
-  { name: 'EuroNews', flag: '🇪🇺', country: 'Europe', channelUrl: 'https://www.youtube.com/embed/pyaT1pD-mns' },
-  
-  // Middle East
-  { name: 'Al Jazeera', flag: '🇶🇦', country: 'Qatar', channelUrl: 'https://www.youtube.com/embed/gCNeDWCI0vo' },
-  { name: 'i24 News', flag: '🇮🇱', country: 'Israel', channelUrl: 'https://www.youtube.com/embed/dll8ISIMrFE' },
-  
-  // Asia
-  { name: 'CNA', flag: '🇸🇬', country: 'Singapore', channelUrl: 'https://www.youtube.com/embed/nc5HP7KZU5U' },
-  { name: 'NHK World', flag: '🇯🇵', country: 'Japan', channelUrl: 'https://www.youtube.com/embed/f0lYkdA-Gtw' },
-  { name: 'NDTV', flag: '🇮🇳', country: 'India', channelUrl: 'https://www.youtube.com/embed/RAVsW-tRiD0' },
-  { name: 'WION', flag: '🇮🇳', country: 'India', channelUrl: 'https://www.youtube.com/embed/gCNeDWCI0vo' },
-  
-  // Australia
-  { name: 'ABC Australia', flag: '🇦🇺', country: 'Australia', channelUrl: 'https://www.youtube.com/embed/NG-aixm4c-Y' },
-  
-  // Russia
-  { name: 'RT News', flag: '🇷🇺', country: 'Russia', channelUrl: 'https://www.youtube.com/embed/S5L5Av1IxZc' },
-  
-  // China
-  { name: 'CGTN', flag: '🇨🇳', country: 'China', channelUrl: 'https://www.youtube.com/embed/5t0lOKrPshI' },
+  { name: 'Sky News', icon: '🌐', channelUrl: 'https://www.youtube.com/embed/YDvsBbKfLPA' },
+  { name: 'Al Jazeera', icon: '🌍', channelUrl: 'https://www.youtube.com/embed/gCNeDWCI0vo' },
+  { name: 'DW News', icon: '📡', channelUrl: 'https://www.youtube.com/embed/LuKwFajn37U' },
+  { name: 'France 24', icon: '🇫🇷', channelUrl: 'https://www.youtube.com/embed/Ap-UM1O9RBU' },
+  { name: 'NDTV', icon: '🇮🇳', channelUrl: 'https://www.youtube.com/embed/5heWvXuwTq0' },
+  { name: 'ABC News', icon: '🇺🇸', channelUrl: 'https://www.youtube.com/embed/wWMI-6OHda4' },
 ];
-
-// Get unique regions for filtering
-export const LIVE_TV_REGIONS = ['All', 'Americas', 'Europe', 'Middle East', 'Asia', 'Australia', 'Russia', 'China'];
 
 // Export available categories
 export const NEWS_CATEGORIES = Object.keys(RSS_SOURCES);
